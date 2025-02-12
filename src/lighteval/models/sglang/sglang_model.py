@@ -59,10 +59,6 @@ else:
     Engine = None
     get_tokenizer = None
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-STARTING_BATCH_SIZE = 512
-
 @dataclass
 class SGLANGModelConfig:
     pretrained: str
@@ -131,7 +127,6 @@ class SGLANGModel(LightevalModel):
 
     def _create_auto_model(self, config: SGLANGModelConfig, env_config: EnvConfig) -> Optional[Engine]:
 
-        # TODO: double check
         self.model_args  = {
             "model_path": config.pretrained,
             "trust_remote_code": config.trust_remote_code,
@@ -201,7 +196,6 @@ class SGLANGModel(LightevalModel):
                 stop_tokens = dataset[0].stop_sequence
 
             max_new_tokens = dataset[0].generation_size  # could be none
-            returns_logits = dataset[0].use_logits
             num_samples = dataset[0].num_samples
 
             context = [c.context for c in dataset]
@@ -264,7 +258,7 @@ class SGLANGModel(LightevalModel):
         generate: bool = True,
     ) -> list[GenerativeResponse]:
         """Contains the actual logic of the generation."""
-        # TODO: double check
+
         self.sampling_params["stop"] = stop_tokens
         self.sampling_params["n"] = num_samples
         self.sampling_params["top_p"] = 1.0

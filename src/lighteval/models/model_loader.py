@@ -41,10 +41,12 @@ from lighteval.utils.imports import (
     NO_LITELLM_ERROR_MSG,
     NO_TGI_ERROR_MSG,
     NO_VLLM_ERROR_MSG,
+    NO_SGLANG_ERROR_MSG,
     is_litellm_available,
     is_openai_available,
     is_tgi_available,
-    is_vllm_available, is_sglang_available, NO_SGLANG_ERROR_MSG,
+    is_vllm_available,
+    is_sglang_available
 )
 from lighteval.utils.utils import EnvConfig
 
@@ -99,8 +101,6 @@ def load_model(  # noqa: C901
         return load_model_with_accelerate_or_default(config=config, env_config=env_config)
 
     if isinstance(config, SGLANGModelConfig):
-        # TODO: double check
-        # return load_model_with_accelerate_or_default(config=config, env_config=env_config)
         return load_sglang_model(config=config, env_config=env_config)
 
     if isinstance(config, OpenAIModelConfig):
@@ -166,6 +166,7 @@ def load_model_with_accelerate_or_default(
 
 def load_dummy_model(config: DummyModelConfig, env_config: EnvConfig):
     return DummyModel(config=config, env_config=env_config)
+
 
 def load_sglang_model(config: SGLANGModelConfig, env_config: EnvConfig):
     if not is_sglang_available():
