@@ -19,10 +19,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-import os
-from typing import Optional
-import re
 import json
+import os
+import re
+from typing import Optional
+
 from typer import Argument, Option
 from typing_extensions import Annotated
 
@@ -34,6 +35,7 @@ HELP_PANEL_NAME_1 = "Common Parameters"
 HELP_PANEL_NAME_2 = "Logging Parameters"
 HELP_PANEL_NAME_3 = "Debug Parameters"
 HELP_PANEL_NAME_4 = "Modeling Parameters"
+
 
 def sglang(
     # === general ===
@@ -137,20 +139,20 @@ def sglang(
         model_config = SGLangModelConfig(config, generation_parameters=generation_parameters)
 
     else:
-        pattern = re.compile(r'(\w+)=(\{.*\}|[^,]+)')
+        pattern = re.compile(r"(\w+)=(\{.*\}|[^,]+)")
         matches = pattern.findall(model_args)
         model_args_dict = {}
         generation_params = None
         for key, value in matches:
             key = key.strip()
             if key == "generation_parameters":
-                value = re.sub(r'(\w+):', r'"\1":', value)
+                value = re.sub(r"(\w+):", r'"\1":', value)
                 value = json.loads(value)
                 generation_params = GenerationParameters(**value)
             else:
                 model_args_dict[key] = value
         model_config = SGLangModelConfig(**model_args_dict, generation_parameters=generation_params)
-        
+
     pipeline = Pipeline(
         tasks=tasks,
         pipeline_parameters=pipeline_params,

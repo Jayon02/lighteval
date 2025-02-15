@@ -51,15 +51,15 @@ from lighteval.utils.imports import (
     NO_ACCELERATE_ERROR_MSG,
     NO_NANOTRON_ERROR_MSG,
     NO_OPENAI_ERROR_MSG,
+    NO_SGLANG_ERROR_MSG,
     NO_TGI_ERROR_MSG,
     NO_VLLM_ERROR_MSG,
-    NO_SGLANG_ERROR_MSG,
     is_accelerate_available,
     is_nanotron_available,
     is_openai_available,
+    is_sglang_available,
     is_tgi_available,
     is_vllm_available,
-    is_sglang_available
 )
 from lighteval.utils.parallelism import test_all_gather
 from lighteval.utils.utils import EnvConfig, make_results_table

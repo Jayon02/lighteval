@@ -135,4 +135,3 @@ class GenerationParameters:
             "min_new_tokens": self.min_new_tokens,
         }
         return {k: v for k, v in args.items() if v is not None}
-

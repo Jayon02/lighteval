@@ -32,21 +32,21 @@ from lighteval.models.endpoints.endpoint_model import (
 from lighteval.models.endpoints.openai_model import OpenAIClient, OpenAIModelConfig
 from lighteval.models.endpoints.tgi_model import ModelClient, TGIModelConfig
 from lighteval.models.litellm_model import LiteLLMClient, LiteLLMModelConfig
-from lighteval.models.sglang.sglang_model import SGLangModelConfig, SGLangModel
+from lighteval.models.sglang.sglang_model import SGLangModel, SGLangModelConfig
 from lighteval.models.transformers.adapter_model import AdapterModel, AdapterModelConfig
 from lighteval.models.transformers.delta_model import DeltaModel, DeltaModelConfig
 from lighteval.models.transformers.transformers_model import TransformersModel, TransformersModelConfig
 from lighteval.models.vllm.vllm_model import VLLMModel, VLLMModelConfig
 from lighteval.utils.imports import (
     NO_LITELLM_ERROR_MSG,
+    NO_SGLANG_ERROR_MSG,
     NO_TGI_ERROR_MSG,
     NO_VLLM_ERROR_MSG,
-    NO_SGLANG_ERROR_MSG,
     is_litellm_available,
     is_openai_available,
+    is_sglang_available,
     is_tgi_available,
     is_vllm_available,
-    is_sglang_available
 )
 from lighteval.utils.utils import EnvConfig
 

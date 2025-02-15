@@ -22,12 +22,8 @@
 
 import gc
 import logging
-import os
-import subprocess
-import signal
 from dataclasses import dataclass
 from typing import Optional
-import pdb
 
 import torch
 from tqdm import tqdm
@@ -47,6 +43,7 @@ from lighteval.tasks.requests import (
 from lighteval.utils.imports import is_sglang_available
 from lighteval.utils.utils import EnvConfig, as_list
 
+
 logger = logging.getLogger(__name__)
 
 if is_sglang_available():
@@ -58,6 +55,7 @@ if is_sglang_available():
 else:
     Engine = None
     get_tokenizer = None
+
 
 @dataclass
 class SGLangModelConfig:
@@ -77,11 +75,14 @@ class SGLangModelConfig:
     pairwise_tokenization: bool = False
     sampling_backend: str | None = None
     attention_backend: str = None
+    mem_fraction_static: float = 0.8
+    chunked_prefill_size: int = 4096
     generation_parameters: GenerationParameters = None
-    
+
     def __post_init__(self):
         if not self.generation_parameters:
             self.generation_parameters = GenerationParameters()
+
 
 class SGLangModel(LightevalModel):
     def __init__(
@@ -111,7 +112,7 @@ class SGLangModel(LightevalModel):
     def tokenizer(self):
         return self._tokenizer
 
-    def cleanup(self):        
+    def cleanup(self):
         if self.model is not None:
             self.model.shutdown()
 
@@ -128,8 +129,7 @@ class SGLangModel(LightevalModel):
         return self._max_length
 
     def _create_auto_model(self, config: SGLangModelConfig, env_config: EnvConfig) -> Optional[Engine]:
-
-        self.model_args  = {
+        self.model_args = {
             "model_path": config.pretrained,
             "trust_remote_code": config.trust_remote_code,
             "dtype": config.dtype,
@@ -141,16 +141,16 @@ class SGLangModel(LightevalModel):
             "tp_size": int(config.tp_size),
             "sampling_backend": config.sampling_backend,
             "attention_backend": config.attention_backend,
-            "mem_fraction_static": 0.8,
+            "mem_fraction_static": float(config.mem_fraction_static),
             "schedule_policy": "fcfs",
-            "chunked_prefill_size": 4096,
+            "chunked_prefill_size": int(config.chunked_prefill_size),
             "disable_radix_cache": True,
         }
 
         model = Engine(**self.model_args)
 
         if self._max_length is None:
-           self._max_length = 8192
+            self._max_length = 8192
 
         return model
 
@@ -193,7 +193,6 @@ class SGLangModel(LightevalModel):
             position=0,
             disable=False,
         ):
-            
             if self.use_chat_template:
                 stop_tokens = []
             else:
@@ -210,7 +209,7 @@ class SGLangModel(LightevalModel):
             # of losing some meaning, or have some generations that are exceedingly short?
             # The choice we go for here is to avoid truncating the prompt if we can, since it
             # should have been managed by the prompt creator/few shot manager if requested by the user.
-            
+
             inputs = tokenized["input_ids"]
             context_size = len(inputs[0])
 
@@ -236,7 +235,7 @@ class SGLangModel(LightevalModel):
                 stop_tokens=stop_tokens,
                 num_samples=num_samples,
             )
-            
+
             for input_token_ids, sglang_output in zip(inputs, sglang_outputs):
                 meta_info = sglang_output["meta_info"]
                 output_token_logprobs = meta_info["output_token_logprobs"]
@@ -250,7 +249,6 @@ class SGLangModel(LightevalModel):
                     input_tokens=input_token_ids,
                 )
                 results.append(cur_response)
-
         return dataset.get_original_order(results)
 
     def _generate(
@@ -276,12 +274,12 @@ class SGLangModel(LightevalModel):
             top_logprobs_num = 1
 
         outputs = self.model.generate(
-                input_ids=inputs,
-                sampling_params=self.sampling_params,
-                return_logprob=True,
-                logprob_start_len = logprob_start_len,
-                top_logprobs_num = top_logprobs_num,
-            )
+            input_ids=inputs,
+            sampling_params=self.sampling_params,
+            return_logprob=True,
+            logprob_start_len=logprob_start_len,
+            top_logprobs_num=top_logprobs_num,
+        )
         return outputs
 
     def loglikelihood(
@@ -309,7 +307,7 @@ class SGLangModel(LightevalModel):
         dataset = LoglikelihoodDataset(requests=requests, num_dataset_splits=1)
         res = []
 
-        for _ in tqdm(dataset.splits_start_end_iterator()):
+        for _ in tqdm(dataset.splits_start_end_iterator(), disable=False):
             # the last token is an eos token, so we don't need to add it
             inputs = [dataset[i].tokenized_context + dataset[i].tokenized_continuation for i in range(len(dataset))]
             # Left truncate the inputs to the maximum length
@@ -321,9 +319,11 @@ class SGLangModel(LightevalModel):
                 meta_info = output["meta_info"]
                 input_token_logprobs = meta_info["input_token_logprobs"][::-1]
                 input_top_logprobs = meta_info["input_top_logprobs"][::-1]
-                input_top_logprobs = input_top_logprobs[:len(input.tokenized_continuation)]
-                continuation_logprobs.append(input_token_logprobs[:len(input.tokenized_continuation)])
-                bool_score = all(top[0][1] == input[1] for top, input in zip(input_top_logprobs, continuation_logprobs[0]))
+                input_top_logprobs = input_top_logprobs[: len(input.tokenized_continuation)]
+                continuation_logprobs.append(input_token_logprobs[: len(input.tokenized_continuation)])
+                bool_score = all(
+                    top[0][1] == input[1] for top, input in zip(input_top_logprobs, continuation_logprobs[0])
+                )
                 answer = LoglikelihoodResponse(
                     input_tokens=input.tokenized_context + input.tokenized_continuation,
                     generated_tokens=input.tokenized_continuation,
