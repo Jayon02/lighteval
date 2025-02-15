@@ -32,7 +32,7 @@ from lighteval.models.endpoints.endpoint_model import (
 from lighteval.models.endpoints.openai_model import OpenAIClient, OpenAIModelConfig
 from lighteval.models.endpoints.tgi_model import ModelClient, TGIModelConfig
 from lighteval.models.litellm_model import LiteLLMClient, LiteLLMModelConfig
-from lighteval.models.sglang.sglang_model import SGLANGModelConfig, SGLANGModel
+from lighteval.models.sglang.sglang_model import SGLangModelConfig, SGLangModel
 from lighteval.models.transformers.adapter_model import AdapterModel, AdapterModelConfig
 from lighteval.models.transformers.delta_model import DeltaModel, DeltaModelConfig
 from lighteval.models.transformers.transformers_model import TransformersModel, TransformersModelConfig
@@ -65,7 +65,7 @@ def load_model(  # noqa: C901
         VLLMModelConfig,
         OpenAIModelConfig,
         LiteLLMModelConfig,
-        SGLANGModelConfig,
+        SGLangModelConfig,
     ],
     env_config: EnvConfig,
 ) -> Union[TransformersModel, AdapterModel, DeltaModel, ModelClient, DummyModel]:
@@ -100,7 +100,7 @@ def load_model(  # noqa: C901
     if isinstance(config, VLLMModelConfig):
         return load_model_with_accelerate_or_default(config=config, env_config=env_config)
 
-    if isinstance(config, SGLANGModelConfig):
+    if isinstance(config, SGLangModelConfig):
         return load_sglang_model(config=config, env_config=env_config)
 
     if isinstance(config, OpenAIModelConfig):
@@ -168,8 +168,8 @@ def load_dummy_model(config: DummyModelConfig, env_config: EnvConfig):
     return DummyModel(config=config, env_config=env_config)
 
 
-def load_sglang_model(config: SGLANGModelConfig, env_config: EnvConfig):
+def load_sglang_model(config: SGLangModelConfig, env_config: EnvConfig):
     if not is_sglang_available():
         raise ImportError(NO_SGLANG_ERROR_MSG)
 
-    return SGLANGModel(config=config, env_config=env_config)
+    return SGLangModel(config=config, env_config=env_config)

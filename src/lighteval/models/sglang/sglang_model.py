@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2024 The HuggingFace Team
+# Copyright (c) 2024 The SGLang Team
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@ import subprocess
 import signal
 from dataclasses import dataclass
 from typing import Optional
+import pdb
 
 import torch
 from tqdm import tqdm
@@ -51,8 +52,7 @@ logger = logging.getLogger(__name__)
 if is_sglang_available():
     from sglang import Engine
     from sglang.srt.hf_transformers_utils import get_tokenizer
-    from sglang.srt.distributed.parallel_state import destroy_model_parallel, destroy_distributed_environment
-    
+
     logging.getLogger("sglang").propagate = True
     logging.getLogger("sglang").handlers.clear()
 else:
@@ -60,7 +60,7 @@ else:
     get_tokenizer = None
 
 @dataclass
-class SGLANGModelConfig:
+class SGLangModelConfig:
     pretrained: str
     load_format: str = "auto"
     dtype: str = "auto"
@@ -74,18 +74,19 @@ class SGLANGModelConfig:
     skip_tokenizer_init: bool = False
     kv_cache_dtype: str = "auto"
     add_special_tokens: bool = True
-    pipeline_parallel_size: int = 1  # how many GPUs to use for pipeline parallelism
-
+    pairwise_tokenization: bool = False
+    sampling_backend: str | None = None
+    attention_backend: str = None
     generation_parameters: GenerationParameters = None
     
     def __post_init__(self):
         if not self.generation_parameters:
             self.generation_parameters = GenerationParameters()
 
-class SGLANGModel(LightevalModel):
+class SGLangModel(LightevalModel):
     def __init__(
         self,
-        config: SGLANGModelConfig,
+        config: SGLangModelConfig,
         env_config: EnvConfig,
     ):
         """Initializes a HuggingFace `AutoModel` and `AutoTokenizer` for evaluation."""
@@ -102,19 +103,20 @@ class SGLANGModel(LightevalModel):
         self.precision = _get_dtype(config.dtype, config=self._config)
         self.sampling_params = config.generation_parameters.to_sglang_dict()
         self.model_info = ModelInfo(model_name=self.model_name, model_sha=self.model_sha)
-        
+        self.sampling_backend = config.sampling_backend
+        self.attention_backend = config.attention_backend
+        self.pairwise_tokenization = config.pairwise_tokenization
+
     @property
     def tokenizer(self):
         return self._tokenizer
 
     def cleanup(self):        
-        destroy_model_parallel()
         if self.model is not None:
             self.model.shutdown()
 
         self.model = None
         gc.collect()
-        destroy_distributed_environment()
         torch.cuda.empty_cache()
 
     @property
@@ -125,7 +127,7 @@ class SGLANGModel(LightevalModel):
     def max_length(self) -> int:
         return self._max_length
 
-    def _create_auto_model(self, config: SGLANGModelConfig, env_config: EnvConfig) -> Optional[Engine]:
+    def _create_auto_model(self, config: SGLangModelConfig, env_config: EnvConfig) -> Optional[Engine]:
 
         self.model_args  = {
             "model_path": config.pretrained,
@@ -134,14 +136,16 @@ class SGLANGModel(LightevalModel):
             "device": "cuda",
             "random_seed": config.random_seed,
             "load_format": config.load_format,
-            "context_length": int(self._max_length) if self._max_length else None,
+            "context_length": int(self._max_length) if self._max_length else 8192,
             "dp_size": int(config.dp_size),
             "tp_size": int(config.tp_size),
-            "log_level": "info",
+            "sampling_backend": config.sampling_backend,
+            "attention_backend": config.attention_backend,
+            "mem_fraction_static": 0.8,
+            "schedule_policy": "fcfs",
+            "chunked_prefill_size": 4096,
+            "disable_radix_cache": True,
         }
-
-        if config.dp_size > 1:
-            pass
 
         model = Engine(**self.model_args)
 
@@ -150,7 +154,7 @@ class SGLANGModel(LightevalModel):
 
         return model
 
-    def _create_auto_tokenizer(self, config: SGLANGModelConfig, env_config: EnvConfig):
+    def _create_auto_tokenizer(self, config: SGLangModelConfig, env_config: EnvConfig):
         tokenizer = get_tokenizer(
             config.pretrained,
             tokenizer_mode="auto",
@@ -259,28 +263,74 @@ class SGLANGModel(LightevalModel):
     ) -> list[GenerativeResponse]:
         """Contains the actual logic of the generation."""
 
-        self.sampling_params["stop"] = stop_tokens
-        self.sampling_params["n"] = num_samples
-        self.sampling_params["top_p"] = 1.0
-        self.sampling_params["top_k"] = -1
-        self.sampling_params["skip_special_tokens"] = True
-        self.sampling_params["temperature"] = 0
-
+        logprob_start_len = None
+        top_logprobs_num = None
         if generate:
             self.sampling_params["max_new_tokens"] = max_new_tokens
+            self.sampling_params["stop"] = stop_tokens
+            self.sampling_params["n"] = num_samples
         else:
             self.sampling_params["max_new_tokens"] = 1
+            self.sampling_params["temperature"] = 0
+            logprob_start_len = 0
+            top_logprobs_num = 1
+
         outputs = self.model.generate(
                 input_ids=inputs,
                 sampling_params=self.sampling_params,
                 return_logprob=True,
+                logprob_start_len = logprob_start_len,
+                top_logprobs_num = top_logprobs_num,
             )
         return outputs
 
     def loglikelihood(
         self, requests: list[LoglikelihoodRequest], override_bs: Optional[int] = None
     ) -> list[LoglikelihoodResponse]:
-        pass
+        for request in requests:
+            if request.context == "":
+                request.tokenized_context = [self.tokenizer.eos_token_id]
+                request.tokenized_continuation = self.tok_encode(request.choice)
+            else:
+                # The following line is mandatory for compatibility with the harness
+                request.tokenized_context, request.tokenized_continuation = self.tok_encode_pair(
+                    request.context, request.choice, pairwise=self.pairwise_tokenization
+                )
+
+        return self._loglikelihood_tokens(requests, override_bs=override_bs)
+
+    def _loglikelihood_tokens(
+        self,
+        requests: list[LoglikelihoodRequest],
+        override_bs: int = -1,
+        return_bool_score: bool = True,
+        rolling: bool = False,
+    ) -> list[LoglikelihoodResponse]:
+        dataset = LoglikelihoodDataset(requests=requests, num_dataset_splits=1)
+        res = []
+
+        for _ in tqdm(dataset.splits_start_end_iterator()):
+            # the last token is an eos token, so we don't need to add it
+            inputs = [dataset[i].tokenized_context + dataset[i].tokenized_continuation for i in range(len(dataset))]
+            # Left truncate the inputs to the maximum length
+            inputs = [input[-self.max_length :] for input in inputs]
+            outputs = self._generate(inputs, generate=False)
+
+            for output, input in zip(outputs, dataset):
+                continuation_logprobs = []
+                meta_info = output["meta_info"]
+                input_token_logprobs = meta_info["input_token_logprobs"][::-1]
+                input_top_logprobs = meta_info["input_top_logprobs"][::-1]
+                input_top_logprobs = input_top_logprobs[:len(input.tokenized_continuation)]
+                continuation_logprobs.append(input_token_logprobs[:len(input.tokenized_continuation)])
+                bool_score = all(top[0][1] == input[1] for top, input in zip(input_top_logprobs, continuation_logprobs[0]))
+                answer = LoglikelihoodResponse(
+                    input_tokens=input.tokenized_context + input.tokenized_continuation,
+                    generated_tokens=input.tokenized_continuation,
+                    result=(sum(item[0] for item in continuation_logprobs[0]), bool_score),
+                )
+                res.append(answer)
+        return dataset.get_original_order(res)
 
     def loglikelihood_rolling():
         pass

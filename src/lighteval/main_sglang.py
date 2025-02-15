@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2024 The HuggingFace Team
+# Copyright (c) 2024 The SGLang Team
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,8 @@
 # SOFTWARE.
 import os
 from typing import Optional
-
+import re
+import json
 from typer import Argument, Option
 from typing_extensions import Annotated
 
@@ -99,7 +100,7 @@ def sglang(
 
     from lighteval.logging.evaluation_tracker import EvaluationTracker
     from lighteval.models.model_input import GenerationParameters
-    from lighteval.models.sglang.sglang_model import SGLANGModelConfig
+    from lighteval.models.sglang.sglang_model import SGLangModelConfig
     from lighteval.pipeline import EnvConfig, ParallelismManager, Pipeline, PipelineParameters
 
     TOKEN = os.getenv("HF_TOKEN")
@@ -133,13 +134,23 @@ def sglang(
         with open(model_args, "r") as f:
             config = yaml.safe_load(f)["model"]
         generation_parameters = GenerationParameters.from_dict(config)
-        model_config = SGLANGModelConfig(config, generation_parameters=generation_parameters)
+        model_config = SGLangModelConfig(config, generation_parameters=generation_parameters)
 
     else:
-        ## cmd arg
-        model_args_dict: dict = {k.split("=")[0]: k.split("=")[1] if "=" in k else True for k in model_args.split(",")}
-
-        model_config = SGLANGModelConfig(**model_args_dict)
+        pattern = re.compile(r'(\w+)=(\{.*\}|[^,]+)')
+        matches = pattern.findall(model_args)
+        model_args_dict = {}
+        generation_params = None
+        for key, value in matches:
+            key = key.strip()
+            if key == "generation_parameters":
+                value = re.sub(r'(\w+):', r'"\1":', value)
+                value = json.loads(value)
+                generation_params = GenerationParameters(**value)
+            else:
+                model_args_dict[key] = value
+        model_config = SGLangModelConfig(**model_args_dict, generation_parameters=generation_params)
+        
     pipeline = Pipeline(
         tasks=tasks,
         pipeline_parameters=pipeline_params,
