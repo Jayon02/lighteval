@@ -93,6 +93,7 @@ nanotron = [
 ]
 tensorboardX = ["tensorboardX"]
 vllm = ["vllm>=0.7.0", "ray", "more_itertools"]
+sglang =["sglang>=0.4.2.post2"]
 quality = ["ruff==v0.2.2","pre-commit"]
 tests = ["pytest==7.4.0"]
 dev = ["lighteval[accelerate,quality,tests,multilingual,math]"]
